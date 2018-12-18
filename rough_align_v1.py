@@ -12,6 +12,7 @@ import os
 from PIL import Image
 from PIL import ImageOps
 from joblib import Parallel, delayed
+import matplotlib.pyplot as plt
 #PIL thinks that big images are attacks
 Image.MAX_IMAGE_PIXELS=1024000001
 
@@ -70,7 +71,28 @@ def displacementFinder(goodMatches,pointsA,pointsB):
         diffEuc=locB-locA
         dists.append(diffEuc)
     return dists    
-    
+
+def removeOutliers2D(ptsX, ptsY, stdevCutoff=4, maxIts=250, keepRatio=0.10):
+    origSize = len(ptsX)
+    oldSize = len(ptsX) + 1
+    groupSize = oldSize -1
+    Its = 1
+    groupList = []
+    groupList.append(oldSize)
+    while Its < maxIts and oldSize > np.floor(origSize*keepRatio):
+        oldSize = groupSize
+        stdX = np.std(ptsX)
+        stdY = np.std(ptsY)
+        boundsX = (np.mean(ptsX)-stdX*stdevCutoff,np.mean(ptsX)+stdX*stdevCutoff)
+        boundsY = (np.mean(ptsY)-stdY*stdevCutoff,np.mean(ptsY)+stdY*stdevCutoff)
+        ptsBoth = [x for x in zip(ptsX,ptsY)]
+        ptsBoth = [s for s in ptsBoth if boundsX[0] < s[0] < boundsX[1] and boundsY[0] < s[1] < boundsY[1]]
+        ptsX = [s[0] for s in ptsBoth]
+        ptsY = [s[1] for s in ptsBoth]
+        groupSize = len(ptsX)
+        groupList.append(groupSize)
+        Its = Its + 1
+    return ptsX,ptsY,groupList
 
 #Parallel(n_jobs=12)(delayed(loadImage)(ID) for ID in range(3))
 rawImageList=Parallel(n_jobs=12)(delayed(loadImage)(ID) for ID in stackIDList)
@@ -89,27 +111,54 @@ orbTestb = featExtractORB(rawImageList[imB].resize(detectDSdimensions,resample=I
 bfNorm = cv2.BFMatcher(cv2.NORM_L2)
 bfHamm = cv2.BFMatcher(cv2.NORM_HAMMING)
 
-matchesORB = bfHamm.knnMatch(orbTesta[1],orbTestb[1], k=2)
-matchesAKAZE = bfNorm.knnMatch(akazeTesta[1],akazeTestb[1], k=2)
-
-goodAKAZE = []
-for m,n in matchesAKAZE:
-    if m.distance < 0.9*n.distance:
-        goodAKAZE.append([m])
+#If this is insufficient, use the knnMatch method and add 'k=2' as a parameter
+matchesORB = bfHamm.match(orbTesta[1],orbTestb[1])
+matchesAKAZE = bfNorm.match(akazeTesta[1],akazeTestb[1])
+#
+#goodAKAZE = []
+#for m,n in matchesAKAZE:
+#    if m.distance < 0.9*n.distance:
+#        goodAKAZE.append([m])
 
 goodORB = []
-for m,n in matchesORB:
-    if m.distance < 0.9*n.distance:
-        goodORB.append([m])
+for m in matchesORB:
+    if m.distance < np.mean([s.distance for s in matchesORB])-2*np.std([s.distance for s in matchesORB]):
+        goodORB.append(m)
 
 outImga=np.array(rawImageList[imA].resize(detectDSdimensions,resample=Image.BILINEAR))
 outImgb=np.array(rawImageList[imB].resize(detectDSdimensions,resample=Image.BILINEAR))
 
-imCompAKAZE = cv2.drawMatchesKnn(outImga,akazeTesta[0],outImgb,akazeTestb[0],
-                         goodAKAZE[1:drawMatchNum], None, flags=2)
+#imCompAKAZE = cv2.drawMatchesKnn(outImga,akazeTesta[0],outImgb,akazeTestb[0],
+#                         goodAKAZE[1:drawMatchNum], None, flags=2)
 
-imCompORB = cv2.drawMatchesKnn(outImga,orbTesta[0],outImgb,orbTestb[0],
-                         goodORB[1:drawMatchNum], None, flags=2)
+imCompORB = cv2.drawMatches(outImga,orbTesta[0],outImgb,orbTestb[0], goodORB[:], None, flags=2)
 
-shimage(imCompAKAZE)
-shimage(imCompORB)
+#shimage(imCompAKAZE)
+#shimage(imCompORB)
+
+#Navigating the dmatch structure
+distances=[goodORB[s].distance for s in range(len(goodORB))]
+
+idxs=[(goodORB[s].queryIdx,goodORB[s].trainIdx) for s in range(len(goodORB))]
+
+list_ptA = [orbTesta[0][s.queryIdx].pt for s in goodORB]
+list_ptB = [orbTestb[0][s.trainIdx].pt for s in goodORB]
+
+diffsX = [list_ptB[s][0]-list_ptA[s][0] for s in range(len(list_ptA))]
+diffsY = [list_ptB[s][1]-list_ptA[s][1] for s in range(len(list_ptA))]
+
+#coords=[(orbTesta[0][idxs[s][0]].pt,orbTestb[0][idxs[s][1]].pt) for s in range(len(goodORB))]
+
+#diffs=[(coords[s][0][0]-coords[s][1][0],coords[s][0][1]-coords[s][1][1]) for s in range(len(goodORB))]
+
+#make the plot of this
+#figORB=plt.scatter([diffs[s][0] for s in range(len(diffs))],[diffs[s][1] for s in range(len(diffs))])
+
+trimX,trimY,trimList =removeOutliers2D(diffsX,diffsY,stdevCutoff=2)
+
+hmap,xedge,yedge = np.histogram2d(trimX,trimY, bins=20)
+extents=[xedge[0],xedge[-1],yedge[0],yedge[-1]]
+plt.imshow(hmap.T,extent=extents,origin='lower',cmap='jet')
+#figORB2=plt.scatter(diffsX,diffsY,c=distances,cmap='hsv')
+figORB2=plt.scatter(trimX,trimY,c=distances,cmap='hsv')
+

@@ -95,7 +95,7 @@ def removeOutliers2D(ptsX, ptsY, stdevCutoff=4, maxIts=250, keepRatio=0.10):
     return ptsX,ptsY,groupList
 
 
-
+#
 #Parallel(n_jobs=12)(delayed(loadImage)(ID) for ID in range(3))
 rawImageList=Parallel(n_jobs=12)(delayed(loadImage)(ID) for ID in stackIDList)
 
@@ -121,9 +121,12 @@ for m in matchesORB:
 outImga=np.array(rawImageList[imA].resize(detectDSdimensions,resample=Image.BILINEAR))
 outImgb=np.array(rawImageList[imB].resize(detectDSdimensions,resample=Image.BILINEAR))
 
+qcFig, (qcAx1, qcAx2) = plt.subplots(2,1)
+
 imCompORB = cv2.drawMatches(outImga,orbTesta[0],outImgb,orbTestb[0], goodORB[:], None, flags=2)
 
-shimage(imCompORB)
+#shimage(imCompORB)
+qcAx1.imshow(imCompORB)
 
 #Navigating the dmatch structure
 distances=[goodORB[s].distance for s in range(len(goodORB))]
@@ -141,6 +144,5 @@ trimX,trimY,trimList =removeOutliers2D(diffsX,diffsY,stdevCutoff=2)
 
 hmap,xedge,yedge = np.histogram2d(trimX,trimY, bins=20)
 extents=[xedge[0],xedge[-1],yedge[0],yedge[-1]]
-plt.imshow(hmap.T,extent=extents,origin='lower',cmap='jet')
-figORB2=plt.scatter(trimX,trimY,c=distances,cmap='hsv')
-
+qcAx2.imshow(hmap.T,extent=extents,origin='lower',cmap='jet')
+qcAx2=plt.scatter(trimX,trimY,c=distances,cmap='hsv') #need the indices here
