@@ -94,55 +94,68 @@ def removeOutliers2D(ptsX, ptsY, stdevCutoff=4, maxIts=250, keepRatio=0.10):
         Its = Its + 1
     return ptsX,ptsY,groupList
 
+def registerImages(imA,imB,method='ORB', DSdims=(1000,1000),maxMatchNum=500):
+    detectDSdimensions = DSdims
+    drawMatchNum = maxMatchNum
+    imA = 0
+    imB = 1
+    orbTesta = featExtractORB(rawImageList[imA].resize(detectDSdimensions,resample=Image.BILINEAR))
+    orbTestb = featExtractORB(rawImageList[imB].resize(detectDSdimensions,resample=Image.BILINEAR))
+    bfNorm = cv2.BFMatcher(cv2.NORM_L2) # ignore this one. it's for SIFT / SURF
+    bfHamm = cv2.BFMatcher(cv2.NORM_HAMMING)
+    matchesORB = bfHamm.match(orbTesta[1],orbTestb[1])
+    
+    
+    
+    #Here is the spot for putting in the coordinates for everything.
+    #The structure should be something like matches, ptsa, ptsb, goodMatch, useForTxBool
+    #They can remain as different structures as long as we keep everything to a list
+    # that is the length of the matches. That might need to be trimmed later, but it's
+    # better to have it and not need it than the converse.
+    
+    goodORB = []
+    for m in matchesORB:
+        if m.distance < np.mean([s.distance for s in matchesORB])-2*np.std([s.distance for s in matchesORB]):
+            goodORB.append(m)
+#    for m in len(matchesORB):
+#        if goodORB[m].distance < np.mean([s.distance for s in matchesORB]):
+#            
 
-#
+
+
+    outImga=np.array(rawImageList[imA].resize(detectDSdimensions,resample=Image.BILINEAR))
+    outImgb=np.array(rawImageList[imB].resize(detectDSdimensions,resample=Image.BILINEAR))
+    qcFig,((qcAx1,qcAx2),(qcAx3,qcAx4)) = plt.subplots(nrows=2,ncols=2)
+
+    imCompORB = cv2.drawMatches(outImga,orbTesta[0],outImgb,orbTestb[0], goodORB[:], None, flags=2)
+    
+    #shimage(imCompORB)
+    qcAx1.imshow(imCompORB)
+    
+    #Navigating the dmatch structures
+    distances=[goodORB[s].distance for s in range(len(goodORB))]
+    
+    idxs=[(goodORB[s].queryIdx,goodORB[s].trainIdx) for s in range(len(goodORB))]
+    
+    list_ptA = [orbTesta[0][s.queryIdx].pt for s in goodORB]
+    list_ptB = [orbTestb[0][s.trainIdx].pt for s in goodORB]
+    
+    diffsX = [list_ptB[s][0]-list_ptA[s][0] for s in range(len(list_ptA))]
+    diffsY = [list_ptB[s][1]-list_ptA[s][1] for s in range(len(list_ptA))]
+    
+    
+    trimX,trimY,trimList =removeOutliers2D(diffsX,diffsY,stdevCutoff=2)
+    
+    hmap,xedge,yedge = np.histogram2d(trimX,trimY, bins=20)
+    extents=[xedge[0],xedge[-1],yedge[0],yedge[-1]]
+    qcAx3.imshow(hmap.T,extent=extents,origin='lower',cmap='jet')
+    qcAx3=plt.scatter(trimX,trimY) #need the indices here
+
+
+
+#The actual code to be run.
+    
 #Parallel(n_jobs=12)(delayed(loadImage)(ID) for ID in range(3))
 rawImageList=Parallel(n_jobs=12)(delayed(loadImage)(ID) for ID in stackIDList)
 
-detectDSdimensions = (1000,1000)
-drawMatchNum = 500
-imA = 0
-imB = 3
 
-orbTesta = featExtractORB(rawImageList[imA].resize(detectDSdimensions,resample=Image.BILINEAR))
-orbTestb = featExtractORB(rawImageList[imB].resize(detectDSdimensions,resample=Image.BILINEAR))
-
-bfNorm = cv2.BFMatcher(cv2.NORM_L2) # ignore this one. it's for SIFT / SURF
-bfHamm = cv2.BFMatcher(cv2.NORM_HAMMING)
-
-#If this is insufficient, use the knnMatch method and add 'k=2' as a parameter
-matchesORB = bfHamm.match(orbTesta[1],orbTestb[1])
-
-goodORB = []
-for m in matchesORB:
-    if m.distance < np.mean([s.distance for s in matchesORB])-2*np.std([s.distance for s in matchesORB]):
-        goodORB.append(m)
-
-outImga=np.array(rawImageList[imA].resize(detectDSdimensions,resample=Image.BILINEAR))
-outImgb=np.array(rawImageList[imB].resize(detectDSdimensions,resample=Image.BILINEAR))
-
-qcFig, (qcAx1, qcAx2) = plt.subplots(2,1)
-
-imCompORB = cv2.drawMatches(outImga,orbTesta[0],outImgb,orbTestb[0], goodORB[:], None, flags=2)
-
-#shimage(imCompORB)
-qcAx1.imshow(imCompORB)
-
-#Navigating the dmatch structure
-distances=[goodORB[s].distance for s in range(len(goodORB))]
-
-idxs=[(goodORB[s].queryIdx,goodORB[s].trainIdx) for s in range(len(goodORB))]
-
-list_ptA = [orbTesta[0][s.queryIdx].pt for s in goodORB]
-list_ptB = [orbTestb[0][s.trainIdx].pt for s in goodORB]
-
-diffsX = [list_ptB[s][0]-list_ptA[s][0] for s in range(len(list_ptA))]
-diffsY = [list_ptB[s][1]-list_ptA[s][1] for s in range(len(list_ptA))]
-
-
-trimX,trimY,trimList =removeOutliers2D(diffsX,diffsY,stdevCutoff=2)
-
-hmap,xedge,yedge = np.histogram2d(trimX,trimY, bins=20)
-extents=[xedge[0],xedge[-1],yedge[0],yedge[-1]]
-qcAx2.imshow(hmap.T,extent=extents,origin='lower',cmap='jet')
-qcAx2=plt.scatter(trimX,trimY,c=distances,cmap='hsv') #need the indices here
