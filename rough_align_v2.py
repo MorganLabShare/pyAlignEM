@@ -170,13 +170,23 @@ for featSlice in range(len(featStack)):
     #For a given span (currently hardcoded at 3 before and after)
 bfHamm = cv2.BFMatcher(cv2.NORM_HAMMING)
 matchStack=list(range(sliceNum))
+matchNumStack=np.zeros((sliceNum,3*2+1))
+
+#WORK ON PARALLELIZING THIS
+#write a function that will take in a slice and the span and find the matches of the surrounding ones and 
+#spit out a row that has all the match aspects (probably trim it in here too.)
 for curSlice in range(sliceNum):
     curMatchList=[]
     for adjSlice in [s for s in list(range(curSlice-3,curSlice+1+3)) if s!=curSlice]:
         if 0<= adjSlice <sliceNum:
             print(curSlice, adjSlice)
             curMatch=bfHamm.match(featStack[curSlice][1],featStack[adjSlice][1])
-            curMatchList.append(curMatch)
+            goodMatch = []
+            for m in curMatch:
+                if m.distance < np.mean([s.distance for s in curMatch])-2*np.std([s.distance for s in curMatch]):
+                    goodMatch.append(m)
+            curMatchList.append(goodMatch)
+            matchNumStack[curSlice,adjSlice-curSlice+3]=len(goodMatch)
     matchStack[curSlice]=curMatchList            
 
 
