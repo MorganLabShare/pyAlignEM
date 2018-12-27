@@ -29,9 +29,11 @@ stackIDList = list(range(sliceNum))
 dstDir = "/home/karl/Data/hxR_waf003_single_test"
 
 rawImageList = list(range(sliceNum))
+
 DSsize=(8000,8000)
 
 featureList = list(range(sliceNum))
+featStack = list(range(sliceNum))
 
 def loadImage(stackID):
     curSlice=sliceList[stackID]
@@ -157,5 +159,24 @@ def registerImages(imA,imB,method='ORB', DSdims=(1000,1000),maxMatchNum=500):
     
 #Parallel(n_jobs=12)(delayed(loadImage)(ID) for ID in range(3))
 rawImageList=Parallel(n_jobs=12)(delayed(loadImage)(ID) for ID in stackIDList)
+
+#Get the features into a stack (kps, desc, imageOfKeypoints) x sliceNum
+detectDSdimensions=(1000,1000)
+featStack=Parallel(n_jobs=12)(delayed(featExtractORB)(ID) for ID in rawImageList)
+for featSlice in range(len(featStack)):
+    featStack[featSlice]=featExtractORB(rawImageList[featSlice].resize(detectDSdimensions,resample=Image.BILINEAR))
+
+#making the matching loop that goes through and gets the matches across all the combinations
+    #For a given span (currently hardcoded at 3 before and after)
+bfHamm = cv2.BFMatcher(cv2.NORM_HAMMING)
+matchStack=list(range(sliceNum))
+for curSlice in range(sliceNum):
+    curMatchList=[]
+    for adjSlice in [s for s in list(range(curSlice-3,curSlice+1+3)) if s!=curSlice]:
+        if 0<= adjSlice <sliceNum:
+            print(curSlice, adjSlice)
+            curMatch=bfHamm.match(featStack[curSlice][1],featStack[adjSlice][1])
+            curMatchList.append(curMatch)
+    matchStack[curSlice]=curMatchList            
 
 
