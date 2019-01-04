@@ -74,6 +74,8 @@ def displacementFinder(goodMatches,pointsA,pointsB):
         dists.append(diffEuc)
     return dists    
 
+#need to rejigger this to make it able to handle an input of the matches that
+    #survive the initial distance cutoff in the previous processing step.
 def removeOutliers2D(ptsX, ptsY, stdevCutoff=4, maxIts=250, keepRatio=0.10):
     origSize = len(ptsX)
     oldSize = len(ptsX) + 1
@@ -162,7 +164,7 @@ rawImageList=Parallel(n_jobs=12)(delayed(loadImage)(ID) for ID in stackIDList)
 
 #Get the features into a stack (kps, desc, imageOfKeypoints) x sliceNum
 detectDSdimensions=(1000,1000)
-featStack=Parallel(n_jobs=12)(delayed(featExtractORB)(ID) for ID in rawImageList)
+#featStack=Parallel(n_jobs=12)(delayed(featExtractORB)(ID) for ID in rawImageList)
 for featSlice in range(len(featStack)):
     featStack[featSlice]=featExtractORB(rawImageList[featSlice].resize(detectDSdimensions,resample=Image.BILINEAR))
 
@@ -170,14 +172,17 @@ for featSlice in range(len(featStack)):
     #For a given span (currently hardcoded at 3 before and after)
 bfHamm = cv2.BFMatcher(cv2.NORM_HAMMING)
 matchStack=list(range(sliceNum))
-matchNumStack=np.zeros((sliceNum,3*2+1))
+
+regSpan = 5
+
+matchNumStack=np.zeros((sliceNum,regSpan*2+1))
 
 #WORK ON PARALLELIZING THIS
 #write a function that will take in a slice and the span and find the matches of the surrounding ones and 
 #spit out a row that has all the match aspects (probably trim it in here too.)
 for curSlice in range(sliceNum):
     curMatchList=[]
-    for adjSlice in [s for s in list(range(curSlice-3,curSlice+1+3)) if s!=curSlice]:
+    for adjSlice in [s for s in list(range(curSlice-regSpan,curSlice+1+regSpan)) if s!=curSlice]:
         if 0<= adjSlice <sliceNum:
             print(curSlice, adjSlice)
             curMatch=bfHamm.match(featStack[curSlice][1],featStack[adjSlice][1])
@@ -186,7 +191,54 @@ for curSlice in range(sliceNum):
                 if m.distance < np.mean([s.distance for s in curMatch])-2*np.std([s.distance for s in curMatch]):
                     goodMatch.append(m)
             curMatchList.append(goodMatch)
-            matchNumStack[curSlice,adjSlice-curSlice+3]=len(goodMatch)
+            matchNumStack[curSlice,adjSlice-curSlice+regSpan]=len(goodMatch)
     matchStack[curSlice]=curMatchList            
 
+#Function of the above. Returns an image of the matches, image of the displacements, 
+# the actual diplacements, and the geometric transform between each pair.
+# Should be sufficient.
+    #For input shortcuts, I'm making it so that you just put in the two entries from
+    #the featStack object, which contains the keypoints, the descriptors, and the
+    #QC image made by 'drawkeypoints' function of cv2.
+def registerImPair(inputA,inputB,showMatches):
+    (kpsA,descA,imA)=inputA
+    (kpsB,descB,imB)=inputB
+    curMatch=bfHamm.match(descA,descB)
+    goodMatch=[]
+    for m in curMatch:
+        if m.distance < np.mean([s.distance for s in curMatch])-2*np.std([s.distance for s in curMatch]):
+                    goodMatch.append(m)
+    #qcFig,((qcAx1,qcAx2),(qcAx3,qcAx4)) = plt.subplots(nrows=2,ncols=2)
+    
+    #Need to remove the outliers without losing my correct indices. Or else go ahead and calculate the 
+    #geo transform before anything else.
+    
+    
+    
+    if showMatches:
+        outImga=inputA[2]
+        outImgb=inputB[2]
+        imCompORB = cv2.drawMatches(outImga,inputA[0],outImgb,inputB[0], goodMatch[:], None, flags=2)
+        
+        shimage(imCompORB)
+    
+    return goodMatch
 
+#
+
+#Can't parallelize because pickle doesn't work on a lot of types of stuff. So we're going to have to 
+    # complete the estimation of the transform and then save the transforms. Probably as matrices
+    # because pickles.
+def registerNeighborhood(curSlice,regSpan,QCBool):
+    neighborhood = list(range(regSpan*2+1))
+    for adjSlice in [s for s in list(range(curSlice-regSpan,curSlice+1+regSpan)) if s!=curSlice]:
+        if 0<=adjSlice<sliceNum:
+            curReg=registerImPair(featStack[curSlice],featStack[adjSlice])
+            neighborhood[adjSlice-curSlice+regSpan]=curReg
+            if QCBool:
+                print("images everywherrrre")
+        else:
+            neighborhood[adjSlice-curSlice+regSpan]=[]
+    return neighborhood
+
+test=Parallel(n_jobs=12)(delayed(registerNeighborhood)(ID,5,0) for ID in stackIDList)
