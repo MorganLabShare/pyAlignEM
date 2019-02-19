@@ -14,19 +14,24 @@ from PIL import ImageOps
 from joblib import Parallel, delayed
 import matplotlib.pyplot as plt
 #PIL thinks that big images are attacks
-Image.MAX_IMAGE_PIXELS=1024000001
+Image.MAX_IMAGE_PIXELS=1025000000
+Image.MAX_IMAGE_PIXELS=None
 
 sliceNum=24
 
-srcDir = "/media/karl/morganlab/MasterRaw/hxR/hxR_waf003_04nm_single_v3"
-srcDir = "/home/karl/Data/fullResLocal"
+#srcDir = "/media/karl/morganlab/MasterRaw/hxR/hxR_waf003_04nm_single_v3"
+#Here are the windows and linux versions of the working directory;
+#comment out whichever is inapprops until later this month when Windows allows
+#the reading of linux partitions.
+srcDir = "/home/karl/Data/fullResLocal/"
+srcDir = "C:\\Users\\karlf\\Documents\\Data\\pyAlignEM\\fullResLocal"
 dirList = os.listdir( srcDir )
 dirList.sort()
 sliceList = [s for s in dirList if 'waf' in s and 'Mont' in s]
 #stackIDList = range(len(sliceList))
 stackIDList = list(range(sliceNum))
 
-dstDir = "/home/karl/Data/hxR_waf003_single_test"
+dstDir = "C:\\Users\\karlf\\Documents\\Data\\pyAlignEM\\working"
 
 rawImageList = list(range(sliceNum))
 
@@ -36,6 +41,7 @@ featureList = list(range(sliceNum))
 featStack = list(range(sliceNum))
 
 def loadImage(stackID):
+    Image.MAX_IMAGE_PIXELS=None
     curSlice=sliceList[stackID]
     fileList=os.listdir( srcDir+"/"+str(curSlice))
     fileName=[s for s in fileList if len(s)<30 and '.tif' in s][0]
@@ -167,6 +173,7 @@ detectDSdimensions=(1000,1000)
 #featStack=Parallel(n_jobs=12)(delayed(featExtractORB)(ID) for ID in rawImageList)
 for featSlice in range(len(featStack)):
     featStack[featSlice]=featExtractORB(rawImageList[featSlice].resize(detectDSdimensions,resample=Image.BILINEAR))
+    print(featSlice)
 
 #making the matching loop that goes through and gets the matches across all the combinations
     #For a given span (currently hardcoded at 3 before and after)
@@ -194,6 +201,9 @@ for curSlice in range(sliceNum):
             matchNumStack[curSlice,adjSlice-curSlice+regSpan]=len(goodMatch)
     matchStack[curSlice]=curMatchList            
 
+
+#The following was getting close, so it is probably the correct path to take, but I think that I can
+    #parallelize the above block more easily than writing a grand unified function for everything.
 #Function of the above. Returns an image of the matches, image of the displacements, 
 # the actual diplacements, and the geometric transform between each pair.
 # Should be sufficient.
