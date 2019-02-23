@@ -17,14 +17,15 @@ import matplotlib.pyplot as plt
 Image.MAX_IMAGE_PIXELS=1025000000
 Image.MAX_IMAGE_PIXELS=None
 
-sliceNum=24
+sliceNum=19
 
 #srcDir = "/media/karl/morganlab/MasterRaw/hxR/hxR_waf003_04nm_single_v3"
 #Here are the windows and linux versions of the working directory;
 #comment out whichever is inapprops until later this month when Windows allows
 #the reading of linux partitions.
 srcDir = "/home/karl/Data/fullResLocal/"
-srcDir = "C:\\Users\\karlf\\Documents\\Data\\pyAlignEM\\fullResLocal"
+#C:\Users\karlf\Documents\Data\ixQ\MasterRaw\ixQ\waf010_BSD_64nm
+srcDir = "C:\\Users\\karlf\\Documents\\Data\\ixQ\\MasterRaw\\ixQ\\waf010_BSD_64nm"
 dirList = os.listdir( srcDir )
 dirList.sort()
 sliceList = [s for s in dirList if 'waf' in s and 'Mont' in s]
@@ -35,7 +36,7 @@ dstDir = "C:\\Users\\karlf\\Documents\\Data\\pyAlignEM\\working"
 
 rawImageList = list(range(sliceNum))
 
-DSsize=(8000,8000)
+DSsize=(8192,8192)
 
 featureList = list(range(sliceNum))
 featStack = list(range(sliceNum))
@@ -46,6 +47,7 @@ def loadImage(stackID):
     fileList=os.listdir( srcDir+"/"+str(curSlice))
     fileName=[s for s in fileList if len(s)<30 and '.tif' in s][0]
     imraw=Image.open( srcDir+"/"+curSlice+"/"+fileName )
+    if len(imraw)
     imDS=imraw.resize(DSsize,resample=Image.BILINEAR)
     imDSL=imDS.convert('L')
     imDSLinv=ImageOps.invert(imDSL)
@@ -243,7 +245,7 @@ def registerNeighborhood(curSlice,regSpan,QCBool):
     neighborhood = list(range(regSpan*2+1))
     for adjSlice in [s for s in list(range(curSlice-regSpan,curSlice+1+regSpan)) if s!=curSlice]:
         if 0<=adjSlice<sliceNum:
-            curReg=registerImPair(featStack[curSlice],featStack[adjSlice])
+            curReg=registerImPair(featStack[curSlice],featStack[adjSlice],1)
             neighborhood[adjSlice-curSlice+regSpan]=curReg
             if QCBool:
                 print("images everywherrrre")
