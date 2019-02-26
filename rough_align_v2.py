@@ -279,6 +279,7 @@ testPickle=Parallel(n_jobs=12)(delayed(pickleTest)(ftMatchPair) for ftMatchPair 
 def registerImPair(inputA,inputB,showMatches):
     (kpsA,descA,imA)=inputA
     (kpsB,descB,imB)=inputB
+    bfHamm = cv2.BFMatcher(cv2.NORM_HAMMING)
     curMatch=bfHamm.match(descA,descB)
     goodMatch=[]
     for m in curMatch:

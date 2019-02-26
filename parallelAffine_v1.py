@@ -88,27 +88,35 @@ def displacementFinder(goodMatches,pointsA,pointsB):
 
 #need to rejigger this to make it able to handle an input of the matches that
     #survive the initial distance cutoff in the previous processing step.
-def removeOutliers2D(ptsX, ptsY, stdevCutoff=4, maxIts=250, keepRatio=0.10):
-    origSize = len(ptsX)
-    oldSize = len(ptsX) + 1
+def removeOutliers2D(matchDat, stdevCutoff=2, maxIts=50, keepRatio=0.20):
+    keepDat=matchDat
+    stdX=100
+    stdY=100
+    xdiffs=[s[4] for s in keepDat]
+    ydiffs=[s[5] for s in keepDat]
+    origSize = len(xdiffs)
+    oldSize = len(xdiffs) + 1
     groupSize = oldSize -1
     Its = 1
     groupList = []
     groupList.append(oldSize)
-    while Its < maxIts and oldSize > np.floor(origSize*keepRatio):
+    while Its < maxIts:
+        xdiffs=[s[4] for s in keepDat]
+        ydiffs=[s[5] for s in keepDat]
         oldSize = groupSize
-        stdX = np.std(ptsX)
-        stdY = np.std(ptsY)
-        boundsX = (np.mean(ptsX)-stdX*stdevCutoff,np.mean(ptsX)+stdX*stdevCutoff)
-        boundsY = (np.mean(ptsY)-stdY*stdevCutoff,np.mean(ptsY)+stdY*stdevCutoff)
-        ptsBoth = [x for x in zip(ptsX,ptsY)]
-        ptsBoth = [s for s in ptsBoth if boundsX[0] < s[0] < boundsX[1] and boundsY[0] < s[1] < boundsY[1]]
-        ptsX = [s[0] for s in ptsBoth]
-        ptsY = [s[1] for s in ptsBoth]
-        groupSize = len(ptsX)
+        stdX = np.std(xdiffs)
+        stdY = np.std(ydiffs)
+        boundsX = (np.mean(xdiffs)-stdX*stdevCutoff,np.mean(xdiffs)+stdX*stdevCutoff)
+        boundsY = (np.mean(ydiffs)-stdY*stdevCutoff,np.mean(ydiffs)+stdY*stdevCutoff)
+        if len(keepDat) > np.floor(origSize*keepRatio):
+            keepDat = [s for s in keepDat \
+                       if boundsX[0] < s[4] < boundsX[1] \
+                       and boundsY[0] < s[5] < boundsY[1]] 
+        groupSize = len(xdiffs)
         groupList.append(groupSize)
         Its = Its + 1
-    return ptsX,ptsY,groupList
+        #plt.scatter([s[4] for s in keepDat],[s[5] for s in keepDat])
+    return keepDat
 
 def registerSubStack(curSlice):
     #get a list of the adjacent slices needing registration
@@ -126,18 +134,23 @@ def registerSubStack(curSlice):
             #get a pared down list ready
             goodMatch=[]
             for m in curMatch:
-                #Get rid of the outlier match distances
-                #in this context, "distance" is a match strength measure and not actual distance.
                 if m.distance < np.mean([s.distance for s in curMatch])-2*np.std([s.distance for s in curMatch]):
-                    goodMatch.append(m)
-                #If I don't like the results from the cutoff, I can just sort and thresh
-                #goodMatch = sorted(goodMatch, key = lambda x:x.distance)
+                    goodMatch.append(m)    #If I don't like the results from the cutoff, I can just sort and thresh
+            #goodMatch = sorted(curMatch, key = lambda x:x.distance)[:200]
             
             #get the consensus matches for the current pair
+            #This has the idxs and the euc pts for each of the good matches
             
+            #KARL: you are looking at the wrong area, you idiot.
+            matchDat=[(goodMatch[s].queryIdx,goodMatch[s].trainIdx, \
+             featStack[curSlice][0][goodMatch[s].queryIdx][2],featStack[adjSlice][0][goodMatch[s].trainIdx][2], \
+             featStack[curSlice][0][goodMatch[s].queryIdx][2][0]-featStack[adjSlice][0][goodMatch[s].trainIdx][2][0], \
+             featStack[curSlice][0][goodMatch[s].queryIdx][2][1]-featStack[adjSlice][0][goodMatch[s].trainIdx][2][1]) \
+             for s in range(len(goodMatch))]
             
-            
-            
+            consensusMatchDat=removeOutliers2D(matchDat,stdevCutoff=3)
+            curTF,status=cv2.findHomography(np.array([s[2] for s in consensusMatchDat]),np.array([s[3] for s in consensusMatchDat]))            
+            subStackTFs[adjSlice-curSlice+regSpan]=curTF
             #subStackTFs[adjSlice-curSlice+regSpan]=len(goodMatch)
             
     return subStackTFs
@@ -158,11 +171,25 @@ for featSlice in range(len(featStack)):
     featStack[featSlice]=[kpsTups,fts,desc]
     print(featSlice)
 
-testSubPar=Parallel(n_jobs=6)(delayed(registerSubStack)(ID) for ID in stackIDList)
+#This is crashing with some bizarre win32 file in use error. Save it for later.
+#testSubPar=Parallel(n_jobs=4)(delayed(registerSubStack)(ID) for ID in stackIDList)
 
+#This is getting all the affine transforms for everyone.
+allTFs=[]
+for curSlice in stackIDList:
+    curTFs=registerSubStack(curSlice)
+    allTFs.append(curTFs)
+    print(curSlice)
 
-
-
+anchorSlice=10
+#Now that all the transforms are available, need to go through and get them set
+#Could try a wobbly mesh / force directed thing. Or just take the average of the transforms to the next five stable ones.
+finalTF=[None]*sliceNum
+finalTF[anchorSlice]=np.float64([[1,0,0],[0,1,0],[0,0,1]])
+for curSlice in reversed(range(anchorSlice)):
+    TF1=allTFs[curSlice+1][regSpan-1]
+    TF2=allTFs[curSlice+1][regSpan+1]*allTFs[curSlice+2][regSpan-2]    
+    
 
 
 
