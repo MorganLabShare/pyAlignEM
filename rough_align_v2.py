@@ -17,7 +17,7 @@ import matplotlib.pyplot as plt
 Image.MAX_IMAGE_PIXELS=1025000000
 Image.MAX_IMAGE_PIXELS=None
 
-sliceNum=19
+sliceNum=30
 
 #srcDir = "/media/karl/morganlab/MasterRaw/hxR/hxR_waf003_04nm_single_v3"
 #Here are the windows and linux versions of the working directory;
@@ -41,14 +41,20 @@ DSsize=(8192,8192)
 featureList = list(range(sliceNum))
 featStack = list(range(sliceNum))
 
+def loadMask(maskFileFullPath):
+    rawMask=Image.open(maskFileFullPath)
+    if rawMask.size!=DSsize:
+        rawMask.resize(DSsize,resample=Image.BILINEAR)
+    return rawMask
+
 def loadImage(stackID):
     Image.MAX_IMAGE_PIXELS=None
     curSlice=sliceList[stackID]
     fileList=os.listdir( srcDir+"/"+str(curSlice))
     fileName=[s for s in fileList if len(s)<30 and '.tif' in s][0]
     imraw=Image.open( srcDir+"/"+curSlice+"/"+fileName )
-    if len(imraw)
-    imDS=imraw.resize(DSsize,resample=Image.BILINEAR)
+    if imraw.size[0]>=DSsize[0]:
+        imDS=imraw.resize(DSsize,resample=Image.BILINEAR)
     imDSL=imDS.convert('L')
     imDSLinv=ImageOps.invert(imDSL)
     imDSinv=imDSLinv.convert('P')
@@ -170,11 +176,23 @@ def registerImages(imA,imB,method='ORB', DSdims=(1000,1000),maxMatchNum=500):
 #Parallel(n_jobs=12)(delayed(loadImage)(ID) for ID in range(3))
 rawImageList=Parallel(n_jobs=12)(delayed(loadImage)(ID) for ID in stackIDList)
 
+#load the mask for just taking the upper right of the image.
+binMask=loadMask(srcDir+"/diagBinMask.tif")
+
 #Get the features into a stack (kps, desc, imageOfKeypoints) x sliceNum
 detectDSdimensions=(1000,1000)
+
 #featStack=Parallel(n_jobs=12)(delayed(featExtractORB)(ID) for ID in rawImageList)
+
+#This is the loop where you do the image manipulations that you need (b&c, mask, etc)
+boxDim=2048
+cropBox=(4096-boxDim,4096,4096,4096+boxDim)
+
 for featSlice in range(len(featStack)):
-    featStack[featSlice]=featExtractORB(rawImageList[featSlice].resize(detectDSdimensions,resample=Image.BILINEAR))
+    #featSliceImage = rawImageList[featSlice].resize(detectDSdimensions,resample=Image.BILINEAR)
+    featSliceImage = rawImageList[featSlice]
+    featSliceImage = featSliceImage.crop(cropBox)
+    featStack[featSlice]=featExtractORB(featSliceImage)
     print(featSlice)
 
 #making the matching loop that goes through and gets the matches across all the combinations
@@ -184,8 +202,34 @@ matchStack=list(range(sliceNum))
 
 regSpan = 5
 
-matchNumStack=np.zeros((sliceNum,regSpan*2+1))
-
+#matchNumStack=np.zeros((sliceNum,regSpan*2+1))
+# Time to make the stack of the numpy arrays that are needed for the matching to take place.
+#This has a sliceNum x 1 x regSpan*2+1 size and contains the feature numpy arrays.
+#I had to make it because of pickles.
+matchFeatStack=[None]*sliceNum
+for curSlice in range(sliceNum):
+    sliceFeatList=[None]*(regSpan*2+1)
+    for adjSlice in [s for s in list(range(curSlice-regSpan,curSlice+1+regSpan)) if s!=curSlice]:
+        if 0<= adjSlice <sliceNum:
+            sliceFeatList[adjSlice-curSlice+regSpan]=featStack[adjSlice][1]
+    matchFeatStack[curSlice]=sliceFeatList
+    
+def getMatches(localFts):
+    matchList=np.zeros((1,regSpan*2+1))
+    curMatchList=[]
+    localHamm = cv2.BFMatcher(cv2.NORM_HAMMING)
+    for adjSlice in [s for s in list(range(curSlice-regSpan,curSlice+1+regSpan)) if s!=curSlice]:
+        if 0<= adjSlice <sliceNum:
+            #print(curSlice, adjSlice)
+            curMatch=localHamm.match(localFts[regSpan],localFts[adjSlice])
+            goodMatch = []
+            for m in curMatch:
+                if m.distance < np.mean([s.distance for s in curMatch])-2*np.std([s.distance for s in curMatch]):
+                    goodMatch.append(m)
+            curMatchList.append(goodMatch)
+            matchList[0,adjSlice-curSlice+regSpan]=len(goodMatch)
+    return matchList
+    
 #WORK ON PARALLELIZING THIS
 #write a function that will take in a slice and the span and find the matches of the surrounding ones and 
 #spit out a row that has all the match aspects (probably trim it in here too.)
@@ -203,6 +247,26 @@ for curSlice in range(sliceNum):
             matchNumStack[curSlice,adjSlice-curSlice+regSpan]=len(goodMatch)
     matchStack[curSlice]=curMatchList            
 
+
+
+testStack=[s[1] for s in featStack]
+matchNumStack=Parallel(n_jobs=12)(delayed(getMatches)(ID,testStack) for ID in range(sliceNum))
+
+#pickleParty
+def pickleTest(pair):
+    localHamm = cv2.BFMatcher(cv2.NORM_HAMMING)
+    curMatch=localHamm.match(pair[0],pair[1])
+    curMatchLen=len(curMatch)
+    #curMatchLen=[1,2,3,4,5,6,7]
+    return curMatchLen
+
+pairStack=[]
+for s in range(13):
+    curPair=[featStack[0][1],featStack[s][1]]
+    pairStack.append(curPair)
+    #pairStack.append([s,0])
+
+testPickle=Parallel(n_jobs=12)(delayed(pickleTest)(ftMatchPair) for ftMatchPair in pairStack)
 
 #The following was getting close, so it is probably the correct path to take, but I think that I can
     #parallelize the above block more easily than writing a grand unified function for everything.
