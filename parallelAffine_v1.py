@@ -5,6 +5,7 @@ Created on Mon Feb 25 15:20:24 2019
 @author: karlf
 """
 import numpy as np
+import sys
 import cv2
 import os
 from PIL import Image
@@ -13,17 +14,24 @@ from joblib import Parallel, delayed
 import matplotlib.pyplot as plt
 import time
 ### Parameters
+system=sys.argv[0]
 
 #These will change each time that the script is used
-srcDir = "C:\\Users\\karlf\\Documents\\Data\\ixQ\\MasterRaw\\ixQ\\waf010_BSD_64nm"
-dstDir = "C:\\Users\\karlf\\Documents\\Data\\pyAlignEM\\working"
+if system=='win': 
+    srcDir = "C:\\Users\\karlf\\Documents\\Data\\ixQ\\MasterRaw\\ixQ\\waf010_BSD_64nm"
+    dstDir = "C:\\Users\\karlf\\Documents\\Data\\pyAlignEM\\working"
+if system=='lin':
+    srcDir = '/media/karl/OS/Users/karlf/Documents/Data/ixQ/MasterRaw/ixQ/waf010_BSD_64nm'
+    dstDir = '/media/karl/OS/Users/karlf/Documents/Data/pyAlignEM/working'
+
 sliceNum=12
 
 #These will change slightly less often
 DSsize=(8192,8192)
 regSpan = 5
 boxDim=2048
-cropBox=(4096-boxDim,4096,4096,4096+boxDim)
+#cropBox=(4096-boxDim,4096,4096,4096+boxDim)
+cropBox=(4096,0,8192,4096)
 
 #PIL thinks that big images are attacks
 Image.MAX_IMAGE_PIXELS=1025000000
@@ -88,7 +96,7 @@ def displacementFinder(goodMatches,pointsA,pointsB):
 
 #need to rejigger this to make it able to handle an input of the matches that
     #survive the initial distance cutoff in the previous processing step.
-def removeOutliers2D(matchDat, stdevCutoff=2, maxIts=50, keepRatio=0.20):
+def removeOutliers2D(matchDat, stdevCutoff=2, maxIts=50, keepRatio=0.40):
     keepDat=matchDat
     stdX=100
     stdY=100
@@ -148,8 +156,9 @@ def registerSubStack(curSlice):
              featStack[curSlice][0][goodMatch[s].queryIdx][2][1]-featStack[adjSlice][0][goodMatch[s].trainIdx][2][1]) \
              for s in range(len(goodMatch))]
             
-            consensusMatchDat=removeOutliers2D(matchDat,stdevCutoff=3)
-            curTF,status=cv2.findHomography(np.array([s[2] for s in consensusMatchDat]),np.array([s[3] for s in consensusMatchDat]))            
+            consensusMatchDat=removeOutliers2D(matchDat,stdevCutoff=2)
+            curTF,status=cv2.findHomography(np.array([s[2] for s in consensusMatchDat]),np.array([s[3] for s in consensusMatchDat]))
+            #delete this: curTF=cv2.getAffineTransform(np.transpose(np.array([s[2] for s in consensusMatchDat])),np.transpose(np.array([s[3] for s in consensusMatchDat])))
             subStackTFs[adjSlice-curSlice+regSpan]=curTF
             #subStackTFs[adjSlice-curSlice+regSpan]=len(goodMatch)
     #time.sleep(5)        
@@ -162,6 +171,8 @@ rawImageList=Parallel(n_jobs=12)(delayed(loadImage)(ID) for ID in stackIDList)
 
 #Feature detection is really quick, and the parallelization makes it slower.
 #Detecting features serially
+qcStack=featStack[:]
+
 for featSlice in range(len(featStack)):
     #featSliceImage = rawImageList[featSlice].resize(detectDSdimensions,resample=Image.BILINEAR)
     featSliceImage = rawImageList[featSlice]
@@ -169,12 +180,13 @@ for featSlice in range(len(featStack)):
     [kps,fts,desc]=featExtractORB(featSliceImage)
     kpsTups=[(s.angle,s.octave,s.pt,s.response,s.size) for s in kps]
     featStack[featSlice]=[kpsTups,fts,desc]
+    qcStack[featSlice]=[kps,fts,desc]
     print(featSlice)
 
 
 
 #This is getting all the affine transforms for everyone.
-serialReg=1
+serialReg=0
 if serialReg:
     allTFs=[]
     for curSlice in stackIDList:
@@ -185,9 +197,58 @@ else:
     #This is crashing with some bizarre win32 file in use error. Save it for later.
     allTFs=Parallel(n_jobs=12)(delayed(registerSubStack)(ID) for ID in stackIDList)
 
-outputFile=dstDir+"\\allTFs_serial2"
+if system=='win':
+    outputFile=dstDir+"\\allTFs_parallel2"
+if system=='lin':
+    outputFile=dstDir+'/allTFs_parallel2'
+
 np.save(outputFile,allTFs)
+
+#Test code for wrapping head around transforms
+def cvConvert(inputImage):
+    imarray=np.array(inputImage,dtype='uint8')
+    imarrayRGB=np.array([imarray,imarray,imarray])
+    imarrayRGBt=np.transpose(imarrayRGB,(1,2,0))
+    cvImage=cv2.cvtColor(imarrayRGBt,cv2.COLOR_BGR2GRAY)
+    return cvImage
+
+def registerImPair(inputA,inputB,showMatches):
+    (kpsA,descA,imA)=inputA
+    (kpsB,descB,imB)=inputB
+    bfHamm = cv2.BFMatcher(cv2.NORM_HAMMING)
+    curMatch=bfHamm.match(descA,descB)
+    goodMatches=[]
+    for m in curMatch:
+        if m.distance < np.mean([s.distance for s in curMatch])-2*np.std([s.distance for s in curMatch]):
+                    goodMatches.append(m)
+    print(len(goodMatches))
+    if showMatches:
+        outImga=inputA[2]
+        outImgb=inputB[2]
+        imCompORB = cv2.drawMatches(outImga,inputA[0],outImgb,inputB[0], goodMatches[:], None, flags=2)
+        
+        shimage(cv2.resize(imCompORB,(2048,1024)))
     
+    return goodMatches
+
+
+cvIm3=cvConvert(rawImageList[4].crop(cropBox))
+cvIm4=cvConvert(rawImageList[9].crop(cropBox))
+
+tf=allTFs[9][0]
+tf=allTFs[5][4]*allTFs[7][3]*allTFs[9][3]
+
+cvIm3wrp=cv2.warpPerspective(cvIm3,tf,(4096,4096))
+
+cvImDiff=cv2.merge((cvIm3wrp,cvIm4,cvIm3*0))
+
+cvImSBS=np.concatenate((cvIm3wrp,cvIm4),axis=1)
+
+shimage(cv2.resize(cvImDiff,(1024,1024)))
+
+shimage(cv2.resize(cvImSBS,(2048,1024)))
+
+ignore=registerImPair(qcStack[9],qcStack[4],1)
 
 anchorSlice=10
 #Now that all the transforms are available, need to go through and get them set
