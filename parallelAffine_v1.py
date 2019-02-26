@@ -11,13 +11,13 @@ from PIL import Image
 from PIL import ImageOps
 from joblib import Parallel, delayed
 import matplotlib.pyplot as plt
-
+import time
 ### Parameters
 
 #These will change each time that the script is used
 srcDir = "C:\\Users\\karlf\\Documents\\Data\\ixQ\\MasterRaw\\ixQ\\waf010_BSD_64nm"
 dstDir = "C:\\Users\\karlf\\Documents\\Data\\pyAlignEM\\working"
-sliceNum=24
+sliceNum=12
 
 #These will change slightly less often
 DSsize=(8192,8192)
@@ -128,7 +128,7 @@ def registerSubStack(curSlice):
     # This could be better if I didn't do the redundant back-matching.
     for adjSlice in adjSliceList:
         print(adjSlice)
-        if 0<=adjSlice<sliceNum:
+        if 0<=adjSlice<curSlice: #This controls whice adjSlices are reg'd
             #create the matches
             curMatch=locHamm.match(featStack[curSlice][1],featStack[adjSlice][1])
             #get a pared down list ready
@@ -152,7 +152,7 @@ def registerSubStack(curSlice):
             curTF,status=cv2.findHomography(np.array([s[2] for s in consensusMatchDat]),np.array([s[3] for s in consensusMatchDat]))            
             subStackTFs[adjSlice-curSlice+regSpan]=curTF
             #subStackTFs[adjSlice-curSlice+regSpan]=len(goodMatch)
-            
+    #time.sleep(5)        
     return subStackTFs
 
 ### The actual code for things
@@ -171,15 +171,23 @@ for featSlice in range(len(featStack)):
     featStack[featSlice]=[kpsTups,fts,desc]
     print(featSlice)
 
-#This is crashing with some bizarre win32 file in use error. Save it for later.
-#testSubPar=Parallel(n_jobs=4)(delayed(registerSubStack)(ID) for ID in stackIDList)
+
 
 #This is getting all the affine transforms for everyone.
-allTFs=[]
-for curSlice in stackIDList:
-    curTFs=registerSubStack(curSlice)
-    allTFs.append(curTFs)
-    print(curSlice)
+serialReg=1
+if serialReg:
+    allTFs=[]
+    for curSlice in stackIDList:
+        curTFs=registerSubStack(curSlice)
+        allTFs.append(curTFs)
+        print(curSlice)
+else:
+    #This is crashing with some bizarre win32 file in use error. Save it for later.
+    allTFs=Parallel(n_jobs=12)(delayed(registerSubStack)(ID) for ID in stackIDList)
+
+outputFile=dstDir+"\\allTFs_serial2"
+np.save(outputFile,allTFs)
+    
 
 anchorSlice=10
 #Now that all the transforms are available, need to go through and get them set
@@ -188,7 +196,7 @@ finalTF=[None]*sliceNum
 finalTF[anchorSlice]=np.float64([[1,0,0],[0,1,0],[0,0,1]])
 for curSlice in reversed(range(anchorSlice)):
     TF1=allTFs[curSlice+1][regSpan-1]
-    TF2=allTFs[curSlice+1][regSpan+1]*allTFs[curSlice+2][regSpan-2]    
+    TF2=allTFs[curSlice+2][regSpan-2]*allTFs[curSlice+1][regSpan+1]
     
 
 
