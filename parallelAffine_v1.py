@@ -1,9 +1,4 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Mon Feb 25 15:20:24 2019
 
-@author: karlf
-"""
 import numpy as np
 import sys
 import cv2
@@ -14,7 +9,8 @@ from joblib import Parallel, delayed
 import matplotlib.pyplot as plt
 import time
 ### Parameters
-system=sys.argv[0]
+if sys.argv[0]:
+    system=sys.argv[0]
 
 #These will change each time that the script is used
 if system=='win': 
@@ -231,12 +227,22 @@ def registerImPair(inputA,inputB,showMatches):
     
     return goodMatches
 
+tfScaleList=[]
+for cs in stackIDList:
+    csTF=allTFs[cs]
+    tfScaleRow=[]
+    ct = csTF[4]
+    if np.size(ct)>1:
+        tfScaleRow.append([ct[0][0],ct[1][1]])
+    else:
+        tfScaleRow.append(0)
+    tfScaleList.append(tfScaleRow)
 
-cvIm3=cvConvert(rawImageList[4].crop(cropBox))
-cvIm4=cvConvert(rawImageList[9].crop(cropBox))
+cvIm3=cvConvert(rawImageList[9].crop(cropBox))
+cvIm4=cvConvert(rawImageList[7].crop(cropBox))
 
-tf=allTFs[9][0]
-tf=allTFs[5][4]*allTFs[7][3]*allTFs[9][3]
+tf=allTFs[9][3]
+#tf=allTFs[5][4]*allTFs[7][3]*allTFs[9][3]
 
 cvIm3wrp=cv2.warpPerspective(cvIm3,tf,(4096,4096))
 
