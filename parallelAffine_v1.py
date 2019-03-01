@@ -79,11 +79,9 @@ def featExtractORB(image):
     return (kps, descs, img)
 
 #shows a numpy array as an image
-def shimage(image,resizeDims=[]):
+def shimage(image,resizeDims=(1024,1024)):
     if isinstance(image.size,int):
         img = Image.fromarray(image)
-    else:
-        img = image.resize(resizeDims)
     img.resize(resizeDims)
     img.show()
 
@@ -99,7 +97,7 @@ def displacementFinder(goodMatches,pointsA,pointsB):
 
 #need to rejigger this to make it able to handle an input of the matches that
     #survive the initial distance cutoff in the previous processing step.
-def removeOutliers2D(matchDat, stdevCutoff=2, maxIts=250, keepRatio=0.10, absMin=10):
+def removeOutliers2D(matchDat, stdevCutoff=2, maxIts=250, keepRatio=0.01, absMin=10):
     keepDat=matchDat
     stdX=100
     stdY=100
@@ -128,31 +126,54 @@ def removeOutliers2D(matchDat, stdevCutoff=2, maxIts=250, keepRatio=0.10, absMin
         Its = Its + 1
         
         #add a plot function and call it here to watch the decrease in the lsit of accepted pts.
-        
+        plotMatches(keepDat)
         
         #plt.scatter([s[4] for s in keepDat],[s[5] for s in keepDat])
     return keepDat
 
-def removeImproved(matchDat, stdevCutoff=2, maxIts=50, keepRatio=0.10, absMin=10, margin=100):
+def removeImproved(matchDat, matchMin=50, absMin=50, margin=200, stdevs=2):
+    #Add code for adaptive neighborhood density. Start with unattainable and relax until group is found.
+    #This will allow to get the nearest group. Unless large rotation, this should work fine.
+    #Need to deal with large rotation if necessary
     keepDat=matchDat
+    keepBin=[0]*len(keepDat)
     xdiffs=[s[4] for s in keepDat]
     ydiffs=[s[5] for s in keepDat]
-    keepBin=[1]*len(keepDat)
+    counts,xedge,yedge=np.histogram2d(xdiffs,ydiffs,bins=100)
+    result = np.where(counts == np.amax(counts))
+    listOfCordinates = list(zip(result[0], result[1]))
+    xbin=xedge[listOfCordinates[0][0]]
+    ybin=yedge[listOfCordinates[0][1]]
     for mp in range(len(keepDat)):
         cxd = keepDat[mp][4]
         cyd = keepDat[mp][5]
-        if len([d for d in xdiffs if cxd-margin < d < cxd+margin])<absMin:
+        if xbin-(margin*0.5) < cxd < xbin+(margin*1.5) and ybin-(margin*0.5) < cyd < ybin+(margin*1.5):
+            keepBin[mp]=1
+    stdevx = np.std([s for s,x in zip(xdiffs,keepBin) if x])
+    stdevy = np.std([s for s,x in zip(ydiffs,keepBin) if x])
+    stmeanx = np.mean([s for s,x in zip(xdiffs,keepBin) if x])
+    stmeany = np.mean([s for s,x in zip(ydiffs,keepBin) if x])
+    
+    for mp in range(len(keepDat)):
+        cxd = keepDat[mp][4]
+        cyd = keepDat[mp][5]
+        if stmeanx-(stdevx*stdevs)<cxd<stmeanx+(stdevx*stdevs) \
+         and stmeany-(stdevy*stdevs)<cyd<stmeany+(stdevy*stdevs):
+            keepBin[mp]=1
+        else:
             keepBin[mp]=0
-        if len([d for d in ydiffs if cyd-margin < d < cyd+margin])<absMin:
-            keepBin[mp]=0
-    return [i for (i,v) in zip(matchDat,keepBin) if v]
+    print(np.sum(keepBin))
+    results=[i for (i,v) in zip(matchDat,keepBin) if v]
+    if debug==1:
+        plotMatches(results)
+    return results
 
-def registerSubStack(curSlice):
+def registerSubStack(curSlice, minRegPts=5):
     #get a list of the adjacent slices needing registration
-    subStackTFs=[None]*(regSpan*2+1)
+    subStackTFs=[np.array([[0,0,0],[0,0,0],[0,0,0]])]*(regSpan*2+1)
     adjSliceList=[s for s in list(range(curSlice-regSpan,curSlice+1+regSpan)) if s!=curSlice]
     #initiate the matcher
-    locHamm=cv2.BFMatcher(cv2.NORM_HAMMING)
+    locHamm=cv2.BFMatcher(cv2.NORM_HAMMING2,crossCheck=True)
     #Go through and do the matching for each of the relevant pairs
     # This could be better if I didn't do the redundant back-matching.
     for adjSlice in adjSliceList:
@@ -162,10 +183,10 @@ def registerSubStack(curSlice):
             curMatch=locHamm.match(featStack[curSlice][1],featStack[adjSlice][1])
             #get a pared down list ready
             goodMatch=[]
-            for m in curMatch:
-                if m.distance < np.mean([s.distance for s in curMatch])-2*np.std([s.distance for s in curMatch]):
-                    goodMatch.append(m)    #If I don't like the results from the cutoff, I can just sort and thresh
-            goodMatch = sorted(curMatch, key = lambda x:x.distance)[500:]
+#            for m in curMatch:
+#                if m.distance < np.mean([s.distance for s in curMatch])-2*np.std([s.distance for s in curMatch]):
+#                    goodMatch.append(m)    #If I don't like the results from the cutoff, I can just sort and thresh
+            goodMatch = sorted(curMatch, key = lambda x:x.distance)[:500]
             
             #get the consensus matches for the current pair
             #This has the idxs and the euc pts for each of the good matches
@@ -176,24 +197,15 @@ def registerSubStack(curSlice):
              featStack[curSlice][0][goodMatch[s].queryIdx][2][0]-featStack[adjSlice][0][goodMatch[s].trainIdx][2][0], \
              featStack[curSlice][0][goodMatch[s].queryIdx][2][1]-featStack[adjSlice][0][goodMatch[s].trainIdx][2][1]) \
              for s in range(len(goodMatch))]
-            
-            #consensusMatchDat=removeOutliers2D(matchDat,stdevCutoff=1)
-            consensusMatchDat=removeImproved(matchDat,absMin=25,margin=50)
             if debug==1:
-                fig = plt.figure(figsize=(5,5))
-                ax1 = fig.add_subplot(111)
-                #ax2 = fig.add_subplot(212)
-                ax1.hist2d([p[4] for p in consensusMatchDat],[p[5] for p in consensusMatchDat],bins=100)
-                ax1.scatter([p[4] for p in consensusMatchDat],[p[5] for p in consensusMatchDat])
-                fig2 = plt.figure(figsize=(5,1))
-                ax2 = fig2.add_subplot(111)
-                ax2.hist([p[4] for p in consensusMatchDat],bins=100)
-                ax2.hist([p[5] for p in consensusMatchDat],bins=100)
-            curTF,status=cv2.findHomography(np.array([s[2] for s in consensusMatchDat]),np.array([s[3] for s in consensusMatchDat]))
-            #delete this: curTF=cv2.getAffineTransform(np.transpose(np.array([s[2] for s in consensusMatchDat])),np.transpose(np.array([s[3] for s in consensusMatchDat])))
-            subStackTFs[adjSlice-curSlice+regSpan]=curTF
-            #subStackTFs[adjSlice-curSlice+regSpan]=len(goodMatch)
-    #time.sleep(5)        
+                plotMatches(matchDat)
+            #consensusMatchDat=removeOutliers2D(matchDat,stdevCutoff=1)
+            consensusMatchDat=removeImproved(matchDat,stdevs=2,margin=200)
+            if debug==1:
+                plotMatches(consensusMatchDat)
+            if len(consensusMatchDat)>minRegPts:
+                curTF,status=cv2.findHomography(np.array([s[2] for s in consensusMatchDat]),np.array([s[3] for s in consensusMatchDat]))
+                subStackTFs[adjSlice-curSlice+regSpan]=curTF
     return subStackTFs
 
 def parFeat(sliceID):
@@ -205,6 +217,18 @@ def parFeat(sliceID):
     print(sliceID)
     return feats
 
+def plotMatches(consensusMatchDat):
+    fig = plt.figure(figsize=(5,5))
+    ax1 = fig.add_subplot(111)
+    #ax2 = fig.add_subplot(212)
+    ax1.hist2d([p[4] for p in consensusMatchDat],[p[5] for p in consensusMatchDat],bins=100)
+    ax1.scatter([p[4] for p in consensusMatchDat],[p[5] for p in consensusMatchDat])
+    fig2 = plt.figure(figsize=(5,1))
+    ax2 = fig2.add_subplot(111)
+    ax2.hist([p[4] for p in consensusMatchDat],bins=100)
+    ax2.hist([p[5] for p in consensusMatchDat],bins=100)
+    return fig,fig2
+
 ### The actual code for things
 
 #Load and downsample the raw images
@@ -214,7 +238,7 @@ rawImageList=Parallel(n_jobs=12)(delayed(loadImage)(ID) for ID in stackIDList)
 #Detecting features serially
 qcStack=featStack[:]
 
-serialFeat=1
+serialFeat=0
 if serialFeat:
     for featSlice in range(len(featStack)):
         #featSliceImage = rawImageList[featSlice].resize(detectDSdimensions,resample=Image.BILINEAR)
@@ -231,7 +255,7 @@ else:
 
 
 #This is getting all the affine transforms for everyone.
-serialReg=1
+serialReg=0
 if serialReg:
     allTFs=[]
     for curSlice in stackIDList:
@@ -288,17 +312,17 @@ for cs in stackIDList:
     tfScaleList.append(tfScaleRow)
 
 cvIm3=cvConvert(rawImageList[5].crop(cropBox))
-cvIm4=cvConvert(rawImageList[9].crop(cropBox))
+cvIm4=cvConvert(rawImageList[8].crop(cropBox))
 
 tf=allTFs[5][8]
 
-cvIm3wrp=cv2.warpPerspective(cvIm3,tf,(4096,4096))
+cvIm3wrp=cv2.warpPerspective(cvIm3,tf,(8192,8192))
 
 cvImDiff=cv2.merge((cvIm3wrp,cvIm4,cvIm3*0))
 
 cvImSBS=np.concatenate((cvIm3wrp,cvIm4),axis=1)
 
-shimage(cv2.resize(cvImDiff,(1024,1024)))
+shimage(cvImDiff)
 
 shimage(cv2.resize(cvImSBS,(2048,1024)))
 
