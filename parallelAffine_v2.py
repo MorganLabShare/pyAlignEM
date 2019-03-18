@@ -8,7 +8,7 @@ from PIL import ImageOps
 from joblib import Parallel, delayed
 import matplotlib.pyplot as plt
 import time
-from scipy.misc import imread
+#from scipy.misc import imread
 ### Parameters
 if sys.argv[0]:
     system=sys.argv[0]
@@ -334,9 +334,9 @@ else:
 
 #Get the right output filname
 if system=='win':
-    outputFile=dstDir+"\\allTFs_parallel2"
+    outputFile=dstDir+"\\allTFs_parallel3"
 if system=='lin':
-    outputFile=dstDir+'/allTFs_parallel2'
+    outputFile=dstDir+'/allTFs_parallel3'
 
 #save the TFs incase they are needed later.
 np.save(outputFile,allTFs)
